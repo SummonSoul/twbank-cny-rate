@@ -3,29 +3,50 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>人民幣 即期匯率（台銀）</title>
+<title>人民幣 即期匯率（台銀） - 轉換器</title>
 <style>
   body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans TC",Helvetica,Arial;margin:0;padding:1rem;background:#f6f8fa;color:#111}
   .card{max-width:520px;margin:1.2rem auto;padding:1.1rem;border-radius:12px;background:#fff;box-shadow:0 6px 18px rgba(20,20,40,0.06)}
   h1{font-size:1.1rem;margin:0 0 .6rem}
-  .rate{font-size:1.9rem;font-weight:700;margin:.6rem 0}
+  .rate{font-size:1.7rem;font-weight:700;margin:.6rem 0}
   .sub{color:#555;margin:.4rem 0}
   .btn{display:inline-block;padding:.5rem .8rem;border-radius:8px;background:#0a84ff;color:#fff;text-decoration:none;border:none;cursor:pointer}
   .small{font-size:.9rem;color:#666}
-  pre{white-space:pre-wrap;word-break:break-word;font-size:.9rem}
+  .field{display:flex;flex-direction:column;margin-top:.8rem}
+  label{font-weight:600;margin-bottom:.25rem}
+  input[type="number"]{padding:.5rem .6rem;border-radius:8px;border:1px solid #ddd;font-size:1rem}
+  .output{padding:.6rem;border-radius:8px;border:1px dashed #e0e6ef;margin-top:.4rem;background:#fbfdff}
+  .row{display:flex;gap:.5rem;align-items:center;margin-top:.6rem}
+  .muted{color:#888;font-size:.9rem}
+  pre{white-space:pre-wrap;word-break:break-word;font-size:.85rem}
 </style>
 </head>
 <body>
   <div class="card" role="main">
-    <h1>台灣銀行 — 人民幣 (CNY) 即期匯率</h1>
+    <h1>台灣銀行 — 人民幣 (CNY) 即期匯率 & 轉換器</h1>
+
     <div id="content">
       <div class="rate" id="rate">載入中…</div>
       <div class="sub" id="detail"></div>
       <div class="small" id="updated"></div>
-      <div style="margin-top:0.8rem">
-        <button id="refresh" class="btn">重新抓取</button>
+
+      <!-- 新增轉換欄位 -->
+      <div class="field">
+        <label for="cnyInput">請輸入人民幣 (CNY) 金額：</label>
+        <input id="cnyInput" type="number" step="0.01" min="0" placeholder="例如 1000" />
+      </div>
+
+      <div class="field">
+        <label>換算成新台幣 (TWD)</label>
+        <div id="twdOutput" class="output">請先抓取匯率或輸入人民幣數量</div>
+        <div class="muted" id="rateNote">平均匯率尚未抓到</div>
+      </div>
+
+      <div class="row">
+        <button id="refresh" class="btn">重新抓取匯率</button>
         <button id="copy" class="btn" style="background:#2d2d2d;margin-left:.5rem">複製結果</button>
       </div>
+
       <p class="small" style="margin-top:.8rem">說明：若無法抓取，會顯示上次成功結果（快取）。資料僅供參考，請以銀行正式交易為準。</p>
       <pre id="debug" style="display:none"></pre>
     </div>
@@ -35,14 +56,11 @@
 const TARGET_URL = "https://rate.bot.com.tw/xrt?Lang=zh-TW";
 
 /**
- * 如果你部署了 Cloudflare Worker，請把它的 URL 放在這裡（例如 https://your-worker.example.workers.dev）
- * Worker 會扮演簡單的 proxy 並加上 Access-Control-Allow-Origin: *
+ * 若你部署了 Cloudflare Worker，請把它的 URL 放在這裡（例如 https://your-worker.example.workers.dev）
+ * Worker 會扮演 proxy 並加上 Access-Control-Allow-Origin: *
  */
 const CF_WORKER_URL = ""; // <-- 可填你的 Worker URL 或留空
 
-/**
- * fallback public proxy (不保證永遠可用 / 有速率限制)
- */
 const FALLBACK_PROXY = "https://api.allorigins.win/raw?url=";
 
 const rateEl = document.getElementById("rate");
@@ -52,25 +70,29 @@ const refreshBtn = document.getElementById("refresh");
 const copyBtn = document.getElementById("copy");
 const debugEl = document.getElementById("debug");
 
+const cnyInput = document.getElementById("cnyInput");
+const twdOutput = document.getElementById("twdOutput");
+const rateNote = document.getElementById("rateNote");
+
+let latestAvg = null; // 儲存最新平均匯率（數字）
+
 function showError(msg){
   rateEl.textContent = "抓取失敗";
   detailEl.textContent = msg;
   updatedEl.textContent = "";
+  rateNote.textContent = "平均匯率未取得";
+  latestAvg = null;
 }
 
-/** 解析台銀頁面，取出人民幣的即期買/賣（副程式更容錯） */
+/** 解析台銀頁面，取出人民幣的即期買/賣 */
 function parseCNYFromHTML(html){
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
-
-  // 優先用 table.row 的結構尋找（比較穩定）
   const rows = doc.querySelectorAll("table.table-striped tbody tr");
   for(const tr of rows){
     const t = tr.textContent || "";
     if(t.includes("人民幣") || t.includes("CNY") || t.includes("人民幣 (CNY)")){
-      // 抓出浮點數
       const nums = Array.from(t.matchAll(/(\d+\.\d+)/g)).map(m=>m[1]);
-      // 多數情況： nums = [現金買, 現金賣, 即期買, 即期賣, ...]
       if(nums.length >= 4){
         const spotBuy = parseFloat(nums[2]);
         const spotSell = parseFloat(nums[3]);
@@ -78,7 +100,6 @@ function parseCNYFromHTML(html){
           return {spotBuy, spotSell};
         }
       }
-      // fallback: 嘗試從特定欄位抓 data-table 屬性（如果頁面用 data-table）
       const buyTd = tr.querySelector('td[data-table="即期買入"], td[data-table="Spot Buy"]');
       const sellTd = tr.querySelector('td[data-table="即期賣出"], td[data-table="Spot Sell"]');
       if(buyTd && sellTd){
@@ -89,7 +110,6 @@ function parseCNYFromHTML(html){
     }
   }
 
-  // 最後嘗試全頁面正則找 "人民幣" 附近的數字
   const text = doc.body ? doc.body.textContent : "";
   const idx = text.indexOf("人民幣");
   if(idx >= 0){
@@ -105,23 +125,19 @@ function parseCNYFromHTML(html){
   throw new Error("無法解析人民幣即期匯率（頁面結構變動或解析失敗）");
 }
 
-/** 先試用 Cloudflare Worker（若有設定），否則 fallback 到 public proxy，再 fallback 直接 fetch（通常會被 CORS 擋） */
 async function fetchRateHtml(){
-  // 如果使用者有設定 Worker
   if(CF_WORKER_URL){
     const url = CF_WORKER_URL + "?url=" + encodeURIComponent(TARGET_URL);
     const res = await fetch(url, {cache: "no-store"});
     if(!res.ok) throw new Error("Worker proxy 錯誤：" + res.status);
     return await res.text();
   }
-  // fallback public proxy
   try{
     const url = FALLBACK_PROXY + encodeURIComponent(TARGET_URL);
     const res = await fetch(url, {cache: "no-store"});
     if(!res.ok) throw new Error("公開 proxy 回傳錯誤：" + res.status);
     return await res.text();
   }catch(e){
-    // 最後嘗試直接 fetch（很可能失敗被 CORS 擋）
     const res = await fetch(TARGET_URL, {cache: "no-store"});
     if(!res.ok) throw new Error("直接 fetch 失敗：" + res.status);
     return await res.text();
@@ -135,8 +151,26 @@ function loadCache(){
   try{ return JSON.parse(localStorage.getItem("cny_spot_cache")||"null"); }catch(e){return null;}
 }
 
+/** 將 CNY 轉成 TWD（使用 latestAvg）並更新畫面 */
+function updateConversion(){
+  const cnyVal = parseFloat(cnyInput.value);
+  if(!latestAvg || isNaN(cnyVal)){
+    if(isNaN(cnyVal) || cnyInput.value === ""){
+      twdOutput.textContent = "請輸入人民幣數量";
+    } else {
+      twdOutput.textContent = "尚未取得平均匯率，無法換算";
+    }
+    return;
+  }
+  const twd = cnyVal * latestAvg;
+  // 用千分位與兩位小數格式化
+  const formatted = twd.toLocaleString('zh-TW', {minimumFractionDigits:2, maximumFractionDigits:2});
+  twdOutput.textContent = `${formatted} TWD（使用平均匯率 ${latestAvg.toFixed(3)}）`;
+}
+
+/** 更新畫面與快取 */
 async function refresh(quiet){
-  if(!quiet) {
+  if(!quiet){
     rateEl.textContent = "更新中…";
     detailEl.textContent = "";
     updatedEl.textContent = "";
@@ -148,11 +182,14 @@ async function refresh(quiet){
     const spotSell = parsed.spotSell;
     const avg = ((spotBuy + spotSell)/2);
     const now = new Date().toLocaleString();
-    rateEl.textContent = `平均：${avg.toFixed(3)}`;
+    rateEl.textContent = `平均：${avg.toFixed(3)} (TWD per CNY)`;
     detailEl.innerHTML = `即期買入：${spotBuy.toFixed(3)}　即期賣出：${spotSell.toFixed(3)}`;
     updatedEl.textContent = `更新時間：${now}`;
+    latestAvg = avg;
+    rateNote.textContent = `目前匯率 (平均)：${avg.toFixed(3)} TWD/CNY`;
     saveCache({spotBuy, spotSell, avg, now});
     debugEl.style.display = "none";
+    updateConversion();
   }catch(err){
     console.error(err);
     const cache = loadCache();
@@ -160,6 +197,9 @@ async function refresh(quiet){
       rateEl.textContent = `平均（快取）：${(cache.avg||0).toFixed(3)}`;
       detailEl.textContent = `即期買入：${(cache.spotBuy||0).toFixed(3)}　即期賣出：${(cache.spotSell||0).toFixed(3)}`;
       updatedEl.textContent = `快取時間：${cache.now || "unknown"}`;
+      latestAvg = cache.avg || null;
+      rateNote.textContent = latestAvg ? `目前匯率 (快取平均)：${latestAvg.toFixed(3)} TWD/CNY` : "平均匯率未取得";
+      updateConversion();
     }else{
       showError("無法抓取匯率，請檢查網路或 proxy 設定。");
     }
@@ -170,7 +210,12 @@ async function refresh(quiet){
 
 refreshBtn.addEventListener("click", ()=>refresh(false));
 copyBtn.addEventListener("click", async ()=>{
-  const text = rateEl.textContent + "\n" + detailEl.textContent + "\n" + updatedEl.textContent;
+  const text = [
+    rateEl.textContent,
+    detailEl.textContent,
+    updatedEl.textContent,
+    `轉換：${cnyInput.value || '(未輸入)'} CNY → ${twdOutput.textContent}`
+  ].join("\n");
   try{
     await navigator.clipboard.writeText(text);
     alert("已複製到剪貼簿");
@@ -179,15 +224,18 @@ copyBtn.addEventListener("click", async ()=>{
   }
 });
 
-// 頁面載入時先用快取值顯示（若有），再後台更新
+cnyInput.addEventListener("input", updateConversion);
+
+// 載入時顯示快取並背景更新
 document.addEventListener("DOMContentLoaded", ()=>{
   const c = loadCache();
   if(c){
     rateEl.textContent = `平均（快取）：${(c.avg||0).toFixed(3)}`;
     detailEl.textContent = `即期買入：${(c.spotBuy||0).toFixed(3)}　即期賣出：${(c.spotSell||0).toFixed(3)}`;
     updatedEl.textContent = `快取時間：${c.now || ""}`;
+    latestAvg = c.avg || null;
+    rateNote.textContent = latestAvg ? `目前匯率 (快取平均)：${latestAvg.toFixed(3)} TWD/CNY` : "平均匯率未取得";
   }
-  // background refresh (quiet=true 表示先不要改 UI 的載入字串)
   refresh(true);
 });
 </script>
