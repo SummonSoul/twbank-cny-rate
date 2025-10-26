@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>人民幣 即期匯率（台銀）</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans TC",Helvetica,Arial;margin:0;padding:1rem;background:#f6f8fa;color:#111}
+  .card{max-width:520px;margin:1.2rem auto;padding:1.1rem;border-radius:12px;background:#fff;box-shadow:0 6px 18px rgba(20,20,40,0.06)}
+  h1{font-size:1.1rem;margin:0 0 .6rem}
+  .rate{font-size:1.9rem;font-weight:700;margin:.6rem 0}
+  .sub{color:#555;margin:.4rem 0}
+  .btn{display:inline-block;padding:.5rem .8rem;border-radius:8px;background:#0a84ff;color:#fff;text-decoration:none;border:none;cursor:pointer}
+  .small{font-size:.9rem;color:#666}
+  pre{white-space:pre-wrap;word-break:break-word;font-size:.9rem}
+</style>
+</head>
+<body>
+  <div class="card" role="main">
+    <h1>台灣銀行 — 人民幣 (CNY) 即期匯率</h1>
+    <div id="content">
+      <div class="rate" id="rate">載入中…</div>
+      <div class="sub" id="detail"></div>
+      <div class="small" id="updated"></div>
+      <div style="margin-top:0.8rem">
+        <button id="refresh" class="btn">重新抓取</button>
+        <button id="copy" class="btn" style="background:#2d2d2d;margin-left:.5rem">複製結果</button>
+      </div>
+      <p class="small" style="margin-top:.8rem">說明：若無法抓取，會顯示上次成功結果（快取）。資料僅供參考，請以銀行正式交易為準。</p>
+      <pre id="debug" style="display:none"></pre>
+    </div>
+  </div>
+
+<script>
+const TARGET_URL = "https://rate.bot.com.tw/xrt?Lang=zh-TW";
+
+/**
+ * 如果你部署了 Cloudflare Worker，請把它的 URL 放在這裡（例如 https://your-worker.example.workers.dev）
+ * Worker 會扮演簡單的 proxy 並加上 Access-Control-Allow-Origin: *
+ */
+const CF_WORKER_URL = ""; // <-- 可填你的 Worker URL 或留空
+
+/**
+ * fallback public proxy (不保證永遠可用 / 有速率限制)
+ */
+const FALLBACK_PROXY = "https://api.allorigins.win/raw?url=";
+
+const rateEl = document.getElementById("rate");
+const detailEl = document.getElementById("detail");
+const updatedEl = document.getElementById("updated");
+const refreshBtn = document.getElementById("refresh");
+const copyBtn = document.getElementById("copy");
+const debugEl = document.getElementById("debug");
+
+function showError(msg){
+  rateEl.textContent = "抓取失敗";
+  detailEl.textContent = msg;
+  updatedEl.textContent = "";
+}
+
+/** 解析台銀頁面，取出人民幣的即期買/賣（副程式更容錯） */
+function parseCNYFromHTML(html){
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+
+  // 優先用 table.row 的結構尋找（比較穩定）
+  const rows = doc.querySelectorAll("table.table-striped tbody tr");
+  for(const tr of rows){
+    const t = tr.textContent || "";
+    if(t.includes("人民幣") || t.includes("CNY") || t.includes("人民幣 (CNY)")){
+      // 抓出浮點數
+      const nums = Array.from(t.matchAll(/(\d+\.\d+)/g)).map(m=>m[1]);
+      // 多數情況： nums = [現金買, 現金賣, 即期買, 即期賣, ...]
+      if(nums.length >= 4){
+        const spotBuy = parseFloat(nums[2]);
+        const spotSell = parseFloat(nums[3]);
+        if(!isNaN(spotBuy) && !isNaN(spotSell)){
+          return {spotBuy, spotSell};
+        }
+      }
+      // fallback: 嘗試從特定欄位抓 data-table 屬性（如果頁面用 data-table）
+      const buyTd = tr.querySelector('td[data-table="即期買入"], td[data-table="Spot Buy"]');
+      const sellTd = tr.querySelector('td[data-table="即期賣出"], td[data-table="Spot Sell"]');
+      if(buyTd && sellTd){
+        const b = parseFloat(buyTd.textContent.trim());
+        const s = parseFloat(sellTd.textContent.trim());
+        if(!isNaN(b) && !isNaN(s)) return {spotBuy:b, spotSell:s};
+      }
+    }
+  }
+
+  // 最後嘗試全頁面正則找 "人民幣" 附近的數字
+  const text = doc.body ? doc.body.textContent : "";
+  const idx = text.indexOf("人民幣");
+  if(idx >= 0){
+    const near = text.slice(Math.max(0, idx-120), idx+300);
+    const nums = Array.from(near.matchAll(/(\d+\.\d+)/g)).map(m=>m[1]);
+    if(nums.length >= 2){
+      const b = parseFloat(nums[0]);
+      const s = parseFloat(nums[1]);
+      if(!isNaN(b) && !isNaN(s)) return {spotBuy:b, spotSell:s};
+    }
+  }
+
+  throw new Error("無法解析人民幣即期匯率（頁面結構變動或解析失敗）");
+}
+
+/** 先試用 Cloudflare Worker（若有設定），否則 fallback 到 public proxy，再 fallback 直接 fetch（通常會被 CORS 擋） */
+async function fetchRateHtml(){
+  // 如果使用者有設定 Worker
+  if(CF_WORKER_URL){
+    const url = CF_WORKER_URL + "?url=" + encodeURIComponent(TARGET_URL);
+    const res = await fetch(url, {cache: "no-store"});
+    if(!res.ok) throw new Error("Worker proxy 錯誤：" + res.status);
+    return await res.text();
+  }
+  // fallback public proxy
+  try{
+    const url = FALLBACK_PROXY + encodeURIComponent(TARGET_URL);
+    const res = await fetch(url, {cache: "no-store"});
+    if(!res.ok) throw new Error("公開 proxy 回傳錯誤：" + res.status);
+    return await res.text();
+  }catch(e){
+    // 最後嘗試直接 fetch（很可能失敗被 CORS 擋）
+    const res = await fetch(TARGET_URL, {cache: "no-store"});
+    if(!res.ok) throw new Error("直接 fetch 失敗：" + res.status);
+    return await res.text();
+  }
+}
+
+function saveCache(obj){
+  try{ localStorage.setItem("cny_spot_cache", JSON.stringify(obj)); }catch(e){}
+}
+function loadCache(){
+  try{ return JSON.parse(localStorage.getItem("cny_spot_cache")||"null"); }catch(e){return null;}
+}
+
+async function refresh(quiet){
+  if(!quiet) {
+    rateEl.textContent = "更新中…";
+    detailEl.textContent = "";
+    updatedEl.textContent = "";
+  }
+  try{
+    const html = await fetchRateHtml();
+    const parsed = parseCNYFromHTML(html);
+    const spotBuy = parsed.spotBuy;
+    const spotSell = parsed.spotSell;
+    const avg = ((spotBuy + spotSell)/2);
+    const now = new Date().toLocaleString();
+    rateEl.textContent = `平均：${avg.toFixed(3)}`;
+    detailEl.innerHTML = `即期買入：${spotBuy.toFixed(3)}　即期賣出：${spotSell.toFixed(3)}`;
+    updatedEl.textContent = `更新時間：${now}`;
+    saveCache({spotBuy, spotSell, avg, now});
+    debugEl.style.display = "none";
+  }catch(err){
+    console.error(err);
+    const cache = loadCache();
+    if(cache){
+      rateEl.textContent = `平均（快取）：${(cache.avg||0).toFixed(3)}`;
+      detailEl.textContent = `即期買入：${(cache.spotBuy||0).toFixed(3)}　即期賣出：${(cache.spotSell||0).toFixed(3)}`;
+      updatedEl.textContent = `快取時間：${cache.now || "unknown"}`;
+    }else{
+      showError("無法抓取匯率，請檢查網路或 proxy 設定。");
+    }
+    debugEl.style.display = "block";
+    debugEl.textContent = String(err);
+  }
+}
+
+refreshBtn.addEventListener("click", ()=>refresh(false));
+copyBtn.addEventListener("click", async ()=>{
+  const text = rateEl.textContent + "\n" + detailEl.textContent + "\n" + updatedEl.textContent;
+  try{
+    await navigator.clipboard.writeText(text);
+    alert("已複製到剪貼簿");
+  }catch(e){
+    alert("複製失敗");
+  }
+});
+
+// 頁面載入時先用快取值顯示（若有），再後台更新
+document.addEventListener("DOMContentLoaded", ()=>{
+  const c = loadCache();
+  if(c){
+    rateEl.textContent = `平均（快取）：${(c.avg||0).toFixed(3)}`;
+    detailEl.textContent = `即期買入：${(c.spotBuy||0).toFixed(3)}　即期賣出：${(c.spotSell||0).toFixed(3)}`;
+    updatedEl.textContent = `快取時間：${c.now || ""}`;
+  }
+  // background refresh (quiet=true 表示先不要改 UI 的載入字串)
+  refresh(true);
+});
+</script>
+</body>
+</html>
