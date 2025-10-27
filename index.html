@@ -47,7 +47,7 @@
         <button id="copy" class="btn" style="background:#2d2d2d;margin-left:.5rem">複製結果</button>
       </div>
 
-      <p class="small" style="margin-top:.8rem">說明：若無法抓取，會顯示上次成功結果（快取）。資料僅供參考，請以銀行正式交易為準。</p>
+      <p class="small" style="margin-top:.8rem">說明：若無法抓取，會顯示上次成功結果（舊資料）。資料僅供參考，請以銀行正式交易為準。</p>
       <pre id="debug" style="display:none"></pre>
     </div>
   </div>
@@ -194,11 +194,11 @@ async function refresh(quiet){
     console.error(err);
     const cache = loadCache();
     if(cache){
-      rateEl.textContent = `平均（快取）：${(cache.avg||0).toFixed(3)}`;
+      rateEl.textContent = `平均（舊資料）：${(cache.avg||0).toFixed(3)}`;
       detailEl.textContent = `即期買入：${(cache.spotBuy||0).toFixed(3)}　即期賣出：${(cache.spotSell||0).toFixed(3)}`;
-      updatedEl.textContent = `快取時間：${cache.now || "unknown"}`;
+      updatedEl.textContent = `舊資料時間：${cache.now || "unknown"}`;
       latestAvg = cache.avg || null;
-      rateNote.textContent = latestAvg ? `目前匯率 (快取平均)：${latestAvg.toFixed(3)} TWD/CNY` : "平均匯率未取得";
+      rateNote.textContent = latestAvg ? `目前匯率 (舊資料平均)：${latestAvg.toFixed(3)} TWD/CNY` : "平均匯率未取得";
       updateConversion();
     }else{
       showError("無法抓取匯率，請檢查網路或 proxy 設定。");
@@ -230,11 +230,11 @@ cnyInput.addEventListener("input", updateConversion);
 document.addEventListener("DOMContentLoaded", ()=>{
   const c = loadCache();
   if(c){
-    rateEl.textContent = `平均（快取）：${(c.avg||0).toFixed(3)}`;
+    rateEl.textContent = `平均（舊資料）：${(c.avg||0).toFixed(3)}`;
     detailEl.textContent = `即期買入：${(c.spotBuy||0).toFixed(3)}　即期賣出：${(c.spotSell||0).toFixed(3)}`;
-    updatedEl.textContent = `快取時間：${c.now || ""}`;
+    updatedEl.textContent = `舊資料時間：${c.now || ""}`;
     latestAvg = c.avg || null;
-    rateNote.textContent = latestAvg ? `目前匯率 (快取平均)：${latestAvg.toFixed(3)} TWD/CNY` : "平均匯率未取得";
+    rateNote.textContent = latestAvg ? `目前匯率 (舊資料平均)：${latestAvg.toFixed(3)} TWD/CNY` : "平均匯率未取得";
   }
   refresh(true);
 });
