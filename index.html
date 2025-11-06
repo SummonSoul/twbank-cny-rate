@@ -194,8 +194,8 @@ async function refresh(quiet){
     console.error(err);
     const cache = loadCache();
     if(cache){
-      rateEl.textContent = `舊資料-請按[重新抓取匯率]`;
-      detailEl.textContent = `前期買入：${(cache.spotBuy||0).toFixed(3)}　前期賣出：${(cache.spotSell||0).toFixed(3)}`;
+      rateEl.textContent = `請[重新抓取匯率]`;
+      detailEl.textContent = `舊資料 - 前期買入：${(cache.spotBuy||0).toFixed(3)}　前期賣出：${(cache.spotSell||0).toFixed(3)}`;
       updatedEl.textContent = `舊資料時間：${cache.now || "unknown"}`;
       latestAvg = cache.avg || null;
       rateNote.textContent = "平均匯率未取得";
@@ -230,8 +230,8 @@ cnyInput.addEventListener("input", updateConversion);
 document.addEventListener("DOMContentLoaded", ()=>{
   const c = loadCache();
   if(c){
-    rateEl.textContent = `舊資料-請按[重新抓取匯率]`;
-    detailEl.textContent = `前期買入：${(c.spotBuy||0).toFixed(3)}　前期賣出：${(c.spotSell||0).toFixed(3)}`;
+    rateEl.textContent = `請[重新抓取匯率]`;
+    detailEl.textContent = `舊資料 - 前期買入：${(c.spotBuy||0).toFixed(3)}　前期賣出：${(c.spotSell||0).toFixed(3)}`;
     updatedEl.textContent = `舊資料時間：${c.now || ""}`;
     latestAvg = c.avg || null;
     rateNote.textContent = "平均匯率未取得";
