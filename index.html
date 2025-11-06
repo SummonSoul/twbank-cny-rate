@@ -182,7 +182,7 @@ async function refresh(quiet){
     const spotSell = parsed.spotSell;
     const avg = ((spotBuy + spotSell)/2);
     const now = new Date().toLocaleString();
-    rateEl.textContent = `平均：${avg.toFixed(3)} (TWD per CNY)`;
+    rateEl.textContent = `平均：${avg.toFixed(3)}`;
     detailEl.innerHTML = `即期買入：${spotBuy.toFixed(3)}　即期賣出：${spotSell.toFixed(3)}`;
     updatedEl.textContent = `更新時間：${now}`;
     latestAvg = avg;
@@ -194,11 +194,11 @@ async function refresh(quiet){
     console.error(err);
     const cache = loadCache();
     if(cache){
-      rateEl.textContent = `平均（舊資料）：${(cache.avg||0).toFixed(3)}`;
-      detailEl.textContent = `即期買入：${(cache.spotBuy||0).toFixed(3)}　即期賣出：${(cache.spotSell||0).toFixed(3)}`;
+      rateEl.textContent = `舊資料-請按[更新]`;
+      detailEl.textContent = `前期買入：${(cache.spotBuy||0).toFixed(3)}　前期賣出：${(cache.spotSell||0).toFixed(3)}`;
       updatedEl.textContent = `舊資料時間：${cache.now || "unknown"}`;
       latestAvg = cache.avg || null;
-      rateNote.textContent = latestAvg ? `目前匯率 (舊資料平均)：${latestAvg.toFixed(3)} TWD/CNY` : "平均匯率未取得";
+      rateNote.textContent = "平均匯率未取得";
       updateConversion();
     }else{
       showError("無法抓取匯率，請檢查網路或 proxy 設定。");
@@ -230,11 +230,11 @@ cnyInput.addEventListener("input", updateConversion);
 document.addEventListener("DOMContentLoaded", ()=>{
   const c = loadCache();
   if(c){
-    rateEl.textContent = `平均（舊資料）：${(c.avg||0).toFixed(3)}`;
-    detailEl.textContent = `即期買入：${(c.spotBuy||0).toFixed(3)}　即期賣出：${(c.spotSell||0).toFixed(3)}`;
+    rateEl.textContent = `舊資料-請按[更新]`;
+    detailEl.textContent = `前期買入：${(c.spotBuy||0).toFixed(3)}　前期賣出：${(c.spotSell||0).toFixed(3)}`;
     updatedEl.textContent = `舊資料時間：${c.now || ""}`;
     latestAvg = c.avg || null;
-    rateNote.textContent = latestAvg ? `目前匯率 (舊資料平均)：${latestAvg.toFixed(3)} TWD/CNY` : "平均匯率未取得";
+    rateNote.textContent = "平均匯率未取得";
   }
   refresh(true);
 });
