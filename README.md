@@ -9,7 +9,7 @@
 
 ![Screenshot_2025-11-08-18-42-20-755_com android chrome](https://github.com/user-attachments/assets/3991c965-2f48-46d4-a57e-6f7af14d3e15)
 
-# 加到主畫面 (讓網頁像 App 一樣好用)
+# 加到主畫面 (讓網頁像 App 一樣好用) :+1:
 # 1. 請使用 Chrome 打開
 ## https://summonsoul.github.io/twbank-cny-rate/
 # 2. 請點選右上角的三個小圓點
